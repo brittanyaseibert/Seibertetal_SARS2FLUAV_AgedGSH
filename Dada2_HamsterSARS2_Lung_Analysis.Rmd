@@ -3,11 +3,12 @@ title: "Dada2_HamsterSARS_Lung_Analysis"
 output: html_notebook
 ---
 
-# Purpose: 
+# Before you begin: 
 These scripts were tailored for the analyses performed in:
   
 Seibert et al, 2022, *Pathobiology and dysbiosis of the respiratory and intestinal microbiota in 14 months old Golden Syrian hamsters infected with SARS-CoV-2.*
 
+# Purpose: 
 This file will go through the DADA2 analysis used to filter, trim, remove chimeras, and combine 2 different batches used to sequence the lung samples in the 
 microbiome analysis. Two batches were needed since some of the sequences were very low quality from the first sequencing run; therefore, we ran a second 
 sequencing run to improve the quality of the reads from those samples. 
