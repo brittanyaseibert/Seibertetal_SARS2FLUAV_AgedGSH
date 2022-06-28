@@ -1,0 +1,250 @@
+---
+title: "Dada2_HamsterSARS2_Intestine_Analysis"
+output: html_notebook
+---
+
+# Purpose: 
+These scripts were tailored for the analyses performed in:
+  
+Seibert et al, 2022, *Pathobiology and dysbiosis of the respiratory and intestinal microbiota in 14 months old Golden Syrian hamsters infected with SARS-CoV-2.*
+
+This file, similar to the Dada2_HamsterSARS2_Lung_Analysis, will go through the DADA2 analysis used to filter, trim, remove chimeras, and combine 2 different batches used to sequence the intestine samples in the microbiome analysis. Two batches were needed since some of the sequences were very low quality from the first sequencing run; therefore, we ran a second 
+sequencing run to improve the quality of the reads from those samples. 
+
+# Load Packages:
+```{r}
+library(dada2)
+library(vegan)
+library(data.table)
+library(ggplot2)
+```
+
+## Define the Path of the two sequencing batches
+```{r}
+path_67 <- "/path/Batch67"
+
+path_68 <- "/path/Batch68"
+
+# List the files that are in the path
+fileList_67 <- list.files(path_67)
+
+fileList_68 <- list.files(path_68)
+```
+
+## Create the filenames that will assign R1 and R2
+```{r}
+fnFs_67 <- sort(list.files(path_67, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs_67 <- sort(list.files(path_67, pattern="_R2_001.fastq", full.names = TRUE))
+
+fnFs_68 <- sort(list.files(path_68, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs_68 <- sort(list.files(path_68, pattern="_R2_001.fastq", full.names = TRUE))
+```
+
+## Extract sample names
+```{r}
+#Assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names_67 <- sapply(strsplit(basename(fnFs_67), "_"), `[`, 1)
+
+sample.names_68 <- sapply(strsplit(basename(fnFs_68), "_"), `[`, 1)
+```
+
+## Visualize the quality of the data in a graph in a pdf
+```{r}
+# Forward Reads
+pdf(file="plot_F-1_67_Intestine.pdf", height=6, width=10)
+plotQualityProfile(fnFs_67[1:12])
+dev.off()
+
+pdf(file="plot_F-1_68_Intestine.pdf", height=6, width=10)
+plotQualityProfile(fnFs_68[1:12])
+dev.off()
+
+# Reverse Reads
+pdf(file="plot_R-1_67_Intestine.pdf", height=6, width=10)
+plotQualityProfile(fnRs_67[1:12])
+dev.off()
+
+pdf(file="plot_R-1_68_Intestine.pdf", height=6, width=10)
+plotQualityProfile(fnRs_68[1:12])
+dev.off()
+```
+
+## Create subdirectory called filtered to place the filtered reads in and create fastq file names to match the original with added "filt"
+```{r}
+filtFs_67 <- file.path(path_67, "filtered", paste0(sample.names_67, "_F_filt.fastq.gz"))
+filtRs_67 <- file.path(path_67, "filtered", paste0(sample.names_67, "_R_filt.fastq.gz"))
+names(filtFs_67) <- sample.names_67
+names(filtRs_67) <- sample.names_67
+
+filtFs_68 <- file.path(path_68, "filtered", paste0(sample.names_68, "_F_filt.fastq.gz"))
+filtRs_68 <- file.path(path_68, "filtered", paste0(sample.names_68, "_R_filt.fastq.gz"))
+names(filtFs_68) <- sample.names_68
+names(filtRs_68) <- sample.names_68
+```
+
+## Trim the reads based on quality and then filter based on quality scores
+```{r}
+# We will use standard filtering parameters: maxN=0 (DADA2 requires no Ns), truncQ=2, rm.phix=TRUE and maxEE=2.
+# The maxEE parameter sets the maximum number of “expected errors” allowed in a read, which is a better filter than simply averaging quality scores.
+
+# Since the quality of the forward read is a lot different than the reverse read i will use different filtering for each
+
+# Filter the forward read
+out_67 <- filterAndTrim(fnFs_67, filtFs_67, fnRs_67, filtRs_67, trimLeft = c(0,50), trimRight = c(10,100), maxN=0, maxEE=2, truncQ=2, rm.phix=TRUE, compress=TRUE)
+
+out_68 <- filterAndTrim(fnFs_68, filtFs_68, fnRs_68, filtRs_68, trimLeft = c(0,50), trimRight = c(10,125), maxN=0, maxEE=2, truncQ=2, rm.phix=TRUE, compress=TRUE)
+
+# Export results of out into csv file
+write.table(x = out_67,file = "/path/outFiltered_67_Intestine.csv", sep = ',', row.names = TRUE, col.names = TRUE)
+
+write.table(x = out_68,file = "/path/outFiltered_68_Intestine.csv", sep = ',', row.names = TRUE, col.names = TRUE)
+```
+
+## Train dada2 algorithm
+```{r}
+errF_67 <- learnErrors(filtFs_67, multithread=TRUE)
+errR_67 <- learnErrors(filtRs_67, multithread=TRUE)
+
+errF_68 <- learnErrors(filtFs_68, multithread=TRUE)
+errR_68 <- learnErrors(filtRs_68, multithread=TRUE)
+
+# Plot the training of the data and export as a pdf
+# Forward Reads
+pdf(file="/path/TrainingDataF_67_Intestine.pdf", height=8, width=12)
+plotErrors(errF_67, nominalQ=TRUE)
+dev.off()
+# Reverse Reads
+pdf(file="/path/TrainingDataR_67_Intestine.pdf", height=8, width=12)
+plotErrors(errR_67, nominalQ=TRUE)
+dev.off()
+
+# Forward Reads
+pdf(file="/path/TrainingDataF_68_Intestine.pdf", height=8, width=12)
+plotErrors(errF_68, nominalQ=TRUE)
+dev.off()
+# Reverse Reads
+pdf(file="/home/path/TrainingDataR_68_Intestine.pdf", height=8, width=12)
+plotErrors(errR_68, nominalQ=TRUE)
+dev.off()
+```
+
+## Apply the dada2 algorithm without pooling
+```{r}
+dadaFs_67 <- dada(filtFs_67, err=errF_67, multithread=TRUE)
+dadaRs_67 <- dada(filtRs_67, err=errR_67, multithread=TRUE)
+
+dadaFs_68 <- dada(filtFs_68, err=errF_68, multithread=TRUE)
+dadaRs_68 <- dada(filtRs_68, err=errR_68, multithread=TRUE)
+```
+
+## Merge the forward and reverse reads with a minimum of 12 bp overlap
+```{r}
+mergers_67 <- mergePairs(dadaFs_67, filtFs_67, dadaRs_67, filtRs_67, verbose=TRUE)
+
+mergers_68 <- mergePairs(dadaFs_68, filtFs_68, dadaRs_68, filtRs_68, verbose=TRUE)
+
+# Make a sequence table to inspect the merging
+seqtab_67 <- makeSequenceTable(mergers_67)
+# Inspect the number of samples and total number of sequences
+dim(seqtab_67)
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab_67)))
+
+# Make a sequence table to inspect the merging
+seqtab_68 <- makeSequenceTable(mergers_68)
+# Inspect the number of samples and total number of sequences
+dim(seqtab_68)
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab_68)))
+```
+
+## Combine the sequencing batches (Batch 67 + Batch 68)
+```{r}
+combinedseqtab <- mergeSequenceTables(table1 = seqtab_67, table2 = seqtab_68)
+
+# Inspect the number of samples and total number of sequences
+dim(combinedseqtab)
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(combinedseqtab)))
+```
+
+## Remove chimeras from ther merged reads/batches
+```{r}
+seqtab.nochim <- removeBimeraDenovo(combinedseqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(combinedseqtab)
+```
+
+## Make a summary file combining all of the steps 
+```{r}
+# Make an overview table
+getN <- function(x) sum(getUniques(x))
+
+# Batch 67
+track_67 <- cbind(out_67, sapply(dadaFs_67, getN), sapply(dadaRs_67, getN), sapply(mergers_67, getN), rowSums(seqtab.nochim))
+colnames(track_67) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track_67) <- sample.names_67
+head(track_67)
+write.table(x = track_67, file = "/path/importOverviewTable_67_Intestine.csv", sep = ',', row.names = TRUE, col.names = TRUE)
+
+# Batch 68
+track_68 <- cbind(out_68, sapply(dadaFs_68, getN), sapply(dadaRs_68, getN), sapply(mergers_68, getN), rowSums(seqtab.nochim))
+colnames(track_68) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track_68) <- sample.names_68
+head(track_68)
+write.table(x = track_68,file = "/path/importOverviewTable_68_Intestine.csv", sep = ',', row.names = TRUE, col.names = TRUE)
+
+# Combined Samples
+totalsamplenames <- c(sample.names_67, sample.names_68)
+track_complete <- as.matrix(rowSums(seqtab.nochim))
+colnames(track_complete) <- "NoChimera"
+rownames(track_complete) <- totalsamplenames
+head(track_complete)
+write.table(x = track_complete, file = "/path/nochimeras_allSamples_Intestine.csv", sep = ',', row.names = TRUE, col.names = TRUE)
+```
+
+## Assign Taxonomy using Silvia v138 classifier
+```{r}
+taxa <- assignTaxonomy(seqtab.nochim, "/path/silva_nr99_v138.1_train_set.fa", multithread=TRUE)
+
+# Add species
+taxawithSpecies <- addSpecies(taxa, "/path/silva_species_assignment_v138.1.fa")
+
+# Inspect the taxa 
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+
+taxa.print_RC <- taxa_RC # Removing sequence rownames for display only
+rownames(taxa.print_RC) <- NULL
+head(taxa.print_RC)
+```
+
+## Format/Export files so that we can use the data for more downstream analysis
+```{r}
+# Giving our seq headers more manageable names (ASV_1, ASV_2...)
+asv_seqs <- colnames(seqtab.nochim)
+asv_headers <- vector(dim(seqtab.nochim)[2], mode="character")
+
+for (i in 1:dim(seqtab.nochim)[2]) {
+asv_headers[i] <- paste(">ASV", i, sep="_")
+}
+
+# Exporting a fasta of our final ASV seqs:
+asv_fasta <- c(rbind(asv_headers, asv_seqs))
+write(asv_fasta, "ASVs.fa")
+
+# Exporting a count table:
+asv_tab <- t(seqtab.nochim)
+row.names(asv_tab) <- sub(">", "", asv_headers)
+write.table(asv_tab, "ASVs_counts_Intestine.tsv", sep="\t", quote=F, col.names=NA)
+
+# Exporting taxonomy table:
+asv_tax_dada <- taxa
+rownames(asv_tax_dada) <- gsub(pattern=">", replacement="", x=asv_headers)
+write.table(asv_tax_dada, "ASVs_taxonomy_dada_Intestine.tsv", sep = "\t", quote=F, col.names=NA)
+
+asv_tax_dada_wSpecies <- taxawithSpecies
+rownames(asv_tax_dada_wSpecies) <- gsub(pattern=">", replacement="", x=asv_headers)
+write.table(asv_tax_dada_wSpecies, "ASVs_taxonomy_dada_wSpecies_Intestine.tsv", sep = "\t", quote=F, col.names=NA)
+```
