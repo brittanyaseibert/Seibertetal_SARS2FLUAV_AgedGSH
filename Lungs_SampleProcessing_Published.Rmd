@@ -1,0 +1,177 @@
+---
+title: "Sequence Processing/Filtering of the Lungs"
+output: html_notebook
+---
+
+# Before you begin:
+
+These scripts were tailored for the analyses performed in:
+  
+Seibert et al, 2022, *Pathobiology and dysbiosis of the respiratory and intestinal microbiota in 14 months old Golden Syrian hamsters infected with SARS-CoV-2.*
+
+# Purpose: 
+This file will go through the initial sample processing and filtering so that the sequences only contain bacteria with a prevalence higher 
+
+
+# Load the needed packages
+```{r,message=FALSE}
+library(phyloseq)
+library(dplyr)
+library(ggplot2)
+```
+
+## Import files from dada2 scripts 
+
+First, we will need to import the ASV count table, taxonomy file and the metadata file.\ 
+
+*In order to read the metadata into a phyloseq object you need to make the SampleID (first column) the row headers*
+```{r}
+# Set working directory
+setwd = "/Users/"
+
+# Import metadata file (provided)
+metadata <- read.csv("/Users/Sars_hamster_metadata.csv", header=T, row.names=1, check.names=F)
+
+# Import count table 
+count_l <- read.table("/Users/ASVs_counts_lungs.tsv", header=T, row.names=1, check.names=F, sep="\t")
+
+# Import taxonomy file 
+taxa_l <- as.matrix(read.table("/Users/ASVs_taxonomy_dada_wSpecies_lungs.tsv", header=T, row.names=1, check.names=F, sep="\t"))
+```
+
+## Filtering variants for ONLY BACTERIA  
+<style>
+div.rose { background-color:#ffc4ef; border-radius: 10px; padding: 40px;}
+</style>
+<div class = "rose">
+When the organisms from a set of samples are well-represented in the taxonomic reference database, it is advisable to filter variants in which a high-rank taxonomy could not be assigned. These are most likely sequence artifacts that don’t exist in nature. Therefore, we will filter out any variants that are not classified as bacteria, have an unclassified phyla or are identified as Chloroplast or Mitochondria.
+</div>
+<br>
+
+**Import files into PhyloSeq**
+```{r}
+# Import count table into phyloseq
+ps_l = otu_table(count_l, taxa_are_rows = TRUE)
+
+# Import taxonomy table into phyloseq 
+tax_l = tax_table(taxa_l)
+
+# Import metadata into phyloseq object
+sample = sample_data(metadata)
+
+# Merge the count table, taxonomy table and sample data 
+Phylo_l = merge_phyloseq(ps_l, tax_l, sample)
+Phylo_l
+```
+
+**Remove sequences that have unassigned Phyla**
+```{r}
+# Create table, number of features for each phyla
+table(tax_table(Phylo_l)[, "Phylum"], exclude = NULL)
+
+# Remove the ASVs and name as uncharacterized if the Phylum has an NA 
+Phylo.filter_l <- subset_taxa(Phylo_l, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
+table(tax_table(Phylo.filter_l)[, "Phylum"], exclude = NULL)
+```
+
+**Filter Eukaryotes, chloroplasts and mitochondria, because we only intended to amplify bacterial sequences**
+```{r}
+# Remove the ASVs and name as uncharacterized if the Phylum has an NA 
+table(tax_table(Phylo.filter_l)[, "Kingdom"], exclude = NULL)
+Phylo.filter_l
+Phylo.filter_filter_l <- Phylo.filter_l %>%
+  subset_taxa(
+    Kingdom == "Bacteria" &
+    Class   != "Chloroplast" &
+    Family  != "Mitochondria")
+Phylo.filter_filter_l
+table(tax_table(Phylo.filter_filter_l)[, "Kingdom"], exclude = NULL)
+```
+
+**Separate the samples from the negative and positive controls**
+```{r}
+# Subset samples to sampleClass in metadata as sample while non-samples include Extraction or PCR 
+Phylo.samples_l <- Phylo.filter_filter_l %>%
+  subset_samples(sampleClass == "sample")
+Phylo.samples_l
+```
+
+### Filter OTUs that are at low prevalence to try and remove sequencing artificacts. 
+
+We will filter out any OTUs found in at least 5% of samples and total OTU abundance is greater that 10 reads 
+```{r}
+# Filter OTUs that are found in at least 5% of samples and total OTU abundance is >= 10 reads 
+library(metagMisc)
+Phylo.samples_l_filter <- phyloseq_filter_prevalence(Phylo.samples_l, prev.trh = 0.05, abund.trh = 10, threshold_condition = "AND")
+Phylo.samples_l_filter
+Phylo.samples_l_filter
+```
+
+### Lets look at the prevalnce of the different phylas 
+```{r}
+# Compute prevalence of each feature, store as data.frame
+prevdf = apply(X = otu_table(Phylo.samples_l),
+               MARGIN = ifelse(taxa_are_rows(Phylo.samples_l), yes = 1, no = 2),
+               FUN = function(x){sum(x > 0)})
+
+# Add taxonomy and total read counts to this data.frame
+prevdf = data.frame(Prevalence = prevdf,
+                    TotalAbundance = taxa_sums(Phylo.samples_l),
+                    tax_table(Phylo.samples_l))
+
+# Subset to the remaining phyla
+prevdf1 = subset(prevdf, Phylum %in% get_taxa_unique(Phylo.samples_l, "Phylum"))
+ggplot(prevdf1, aes(TotalAbundance, Prevalence / nsamples(Phylo.samples_l),color=Phylum)) +
+  # Include a guess for parameter
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) +  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+```
+
+## Figure S10A: Coverage Boxplot 
+Then lets create a boxplot comparing negative controls to samples when we look at coverage. This could be a good way to show that the samples have much higher reads/sample compared to the negative controls, especially the lungs, since those can be easily contaminated. Negative controls included: 2 Extraction Negative controls, 2 PCR negative controls 
+```{r}
+# Make a data frame with a column for the read counts of each sample in the intestine and then the lungs. Then combine the 2 dataframes into 1. The intestine is processed in a different R notebook 
+read.counts_i <- data.frame(sum = sample_sums(Phylo.samples_i_filter))
+read.counts_l <- data.frame(sum = sample_sums(Phylo.samples_l_removed9_filter))
+read.counts_control <- data.frame(sum = sample_sums(Phylo.control_i))
+read.counts <- bind_rows(read.counts_i, read.counts_l, read.counts_control)
+
+# Add metadata to read.counts 
+read.counts <- tibble::rownames_to_column(read.counts, "SampleID")
+read.counts.mt <-left_join(read.counts, metadata, by = "SampleID")
+
+# Calculate the means of each sample 
+means <- aggregate(sum ~  sampleClass + SampleType, read.counts.mt, mean)
+means
+
+# Convert sampleClass and SampleType to a factor with specific levels so that we can order them 
+read.counts.mt$sampleClass <- factor(read.counts.mt$sampleClass, levels = c("Extraction", "PCR", "sample"))
+read.counts.mt$SampleType <- factor(read.counts.mt$SampleType, levels = c("Extraction", "PCR", "Lung","Duodenum","Ileum", "Cecum", "Feces"))
+
+# Assign the color groups for the graph 
+colorgroups = c("black", "brown", "dodgerblue2", "hotpink1", "yellow","red", "orange")
+
+# FIGURE S10A
+ggplot(read.counts.mt, aes(x = sampleClass, y = sum, fill = SampleType)) + 
+  geom_boxplot() +
+  ylab("Coverage (Reads / Sample)") +
+  theme(axis.title.y = element_blank())+
+  theme_bw()+
+  theme(panel.grid = element_blank(),
+      text = element_text(size=17),
+      axis.text.y=element_text(colour="black"),
+      panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  scale_color_manual(values = colorgroups)+
+  scale_fill_manual(values = colorgroups)+
+  scale_y_continuous(breaks = seq(0, 100000, by=10000), limits=c(0, 100000), labels = scales::comma)
+
+# Export DataFrame into csv file to plot in Prism 
+write.csv(read.counts.mt, "/Users/Coverage_SampleType.csv")
+```
+
+```{r}
+# Save phyloseq files to a R file so that i can reload the filtered file 
+saveRDS(object = Phylo.samples_l_filter, file = "/Users/Phylo.samples_l.rds")
+```
+
