@@ -1,0 +1,896 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Taxonomic Analysis 
+
+Load packages 
+```{r}
+library(phyloseq)
+library(outliers)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(devtools)
+library(ggpubr)
+library(vegan)
+library(DESeq2)
+library(microbiome)
+library(RColorBrewer)
+library(forcats)
+library(Rmisc)
+library(metagMisc)
+library(stringr)
+```
+
+In order to make the taxonomic barplots in Phyloseq, we will need the filtered data that we made previously in alpha diversity. 
+
+<style>
+div.rose { background-color:#ffc4ef; border-radius: 10px; padding: 40px;}
+</style>
+<div class = "rose">
+*Program used: Phyloseq and ggplot*
+</div>
+<br>
+
+# Before you begin:
+
+These scripts were tailored for the analyses performed in: 
+
+Seibert et al, 2022, *Pathobiology and dysbiosis of the respiratory and intestinal microbiota in 14 months old Golden Syrian hamsters infected with SARS-CoV-2*
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+# Purpose: 
+The purpose of this script is to analyze taxonomic diversity and taxonomic differential analysis on the lungs. 
+
+# Load the R file from previous data processing
+```{r,message=FALSE}
+# Load the file RarifiedASVs.rds 
+Phylo.samples_l_filter <- readRDS(file = "/Users/Phylo.samples_l.rds")
+```
+
+# Figure 3D: Taxonomic bar graph of the phyla aggregated my dpi and Sample Type
+```{r}
+Taxonomy_l <- Phylo.samples_l_filter %>% 
+  tax_glom(taxrank = "Phylum") %>%      
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%       # Transform to relative abundance
+  psmelt()                                             # Melt to long format (this is for ggplot), create dataframe
+
+Taxonomy_l$Abundance <- Taxonomy_l$Abundance*100
+
+# Determine the percentages of the phylum within the groups across the different dpc 
+Taxonomy_l_2 <- Taxonomy_l %>%
+  group_by(Group_PostInfect,dpi, Phylum) %>%
+  dplyr::summarise(Mean = mean(Abundance)) %>%
+  arrange(-Mean)
+
+# Reorder the groups 
+Taxonomy_l_2$Group_PostInfect <- factor(Taxonomy_l_2$Group_PostInfect, levels = c('SARS-CoV-2', 'IAV-SARS-CoV-2', 'Mock'))
+Taxonomy_l_2$dpi <- factor(Taxonomy_l_2$dpi, levels = c("3", "6"))
+
+colorgroups = c("lightslateblue","palevioletred1","slategray","darkgoldenrod1","green3","red2","darkseagreen","peachpuff1","mediumorchid","ivory4","tan4","royalblue2","lightsalmon2")
+
+# FIGURE 3D
+pdf("/Users/TaxonomicBarplot_phylum_Lungs.pdf",
+    width = 12, height = 17, # Width and height in inches
+    bg = "white", )
+
+ggplot(data=Taxonomy_l_2, aes(x=dpi, y=Mean, fill=reorder(Phylum, desc(Phylum)))) +
+  geom_bar(aes(), stat = "identity", color = "black", position="stack", width = 0.9) + 
+  scale_fill_manual(values=colorgroups) +
+  facet_grid(~Group_PostInfect, scales = "free", space = "free")+
+  xlab("dpi")+ 
+  ylab("Relative Abundance (%)") +
+  #guides(fill=guide_legend(title = "Taxonomy", ncol =1))+
+  guides(fill= "none")+
+  theme(axis.title.x = element_text(vjust = -.5, size = 24),
+          axis.title.y = element_text(vjust=1.5, size = 24),
+          axis.text.x = element_text(colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          text = element_text(size=40),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5))+
+          #legend.title = element_text(size = 18, face = "bold"), 
+          #legend.text = element_text(size = 14)) +
+  theme(panel.grid = element_blank(),
+          axis.line = element_line(color="black", size = 0.3),
+          panel.border = element_blank(),
+          panel.background =  element_rect(fill='white'))
+
+dev.off() 
+
+# Plot using ggplot with legend
+pdf("/Users/TaxonomicBarplot_phylum_Lungs_labels.pdf",
+    width = 15, height = 17, # Width and height in inches
+    bg = "white", )
+
+ggplot(data=Taxonomy_l_2, aes(x=dpi, y=Mean, fill=reorder(Phylum, desc(Phylum)))) +
+  geom_bar(aes(), stat = "identity", color = "black", position="stack", width = 0.9) + 
+  scale_fill_manual(values=colorgroups)+
+   #scale_fill_manual(values=c("Taxonomy < 2 %" = "grey53", colorgroups))+
+  facet_grid(~Group_PostInfect, scales = "free", space = "free")+
+  xlab("dpi")+ 
+  ylab("Relative Abundance (%)") +
+  guides(fill=guide_legend(title = "Taxonomy", ncol =1))+
+  theme(axis.title.x = element_text(vjust = -.5, size = 24),
+          axis.title.y = element_text(vjust=1.5, size = 24),
+          axis.text.x = element_text(colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          text = element_text(size=26),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5),
+          legend.title = element_text(size = 22, face = "bold"))+ 
+          #legend.text = element_text(size = 14)) +
+  theme(panel.grid = element_blank(),
+          axis.line = element_line(color="black", size = 0.5),
+          panel.border = element_blank(),
+          panel.background =  element_rect(fill='white'))
+dev.off() 
+```
+
+# Figure 3E: Taxonomic bar graph with different levels of classification 
+```{r}
+Taxonomy_l <- Phylo.samples_l_filter %>%  
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%       # Transform to relative abundance
+  psmelt()                                             # Melt to long format (this is for ggplot), create dataframe
+
+write.csv(Taxonomy_l, "/Users/RelativeAbundance_NOGlom.csv")
+
+# Create a new column called TaxonomyName that combines the different taxonomic levels separated by ; 
+Taxonomy_l$TaxonomyName<-paste(Taxonomy_l$Phylum,Taxonomy_l$Class, Taxonomy_l$Order, Taxonomy_l$Family, Taxonomy_l$Genus, sep="; ")
+
+Taxonomy_l$Abundance <- Taxonomy_l$Abundance*100
+
+# Assign low abundant bacteria to under prevalence
+Taxonomy_l$TaxonomyName[Taxonomy_l$Abundance < 1] <- "Taxonomy < 1 %" 
+
+# Determine the relative abundances of Haemophilus among different dpc 
+Taxonomy_l_2 <- Taxonomy_l %>%
+  group_by(Group_PostInfect,HamsterID, dpi, TaxonomyName) %>%
+  dplyr::summarise(Sum = sum(Abundance)) %>%
+  arrange(-Sum)
+
+# Reorder the groups 
+Taxonomy_l_2$Group_PostInfect <- factor(Taxonomy_l_2$Group_PostInfect, levels = c('SARS-CoV-2', 'IAV-SARS-CoV-2', 'Mock'))
+Taxonomy_l_2$HamsterID <- factor(Taxonomy_l_2$HamsterID, levels = c("15", "16", "17", "14", "13", "11", "12","8",  "9", "10", "7", "4", "5", "3", "2", "1"))
+
+# Define color using R color brewer with the number of taxa we need. 
+# Actinobacteriota = orange
+# Bacteroidota = blue
+# Campy = 
+# Firmicutes = red and purple 
+# Fusobacteriota = green
+# Proteobacteria = gold 
+# Spirochaetota = 
+# Taxonomy <2 % = grey60
+
+colorgroups = c("snow1",
+                "grey60",
+                "gold4","goldenrod3","gold3","darkgoldenrod3","yellow3","gold1","yellow","lightgoldenrod2","khaki1", "lightgoldenrodyellow","lemonchiffon1",  #Proteobacteria,
+                "forestgreen", "limegreen",  #Fusobacteriota,
+                "coral", "coral4",
+                "indianred4","tomato4", "red4","brown3","firebrick3","red3","indianred","orangered3","red1", "indianred2", "violetred3", "palevioletred", "hotpink","violetred2", "palevioletred1", "pink2","pink","mistyrose",
+                
+                "purple4","darkmagenta","mediumorchid4","purple3", "purple", "mediumpurple1", "plum3","orchid1",
+                "plum1", #Firmicutes,
+                "darkseagreen", #Fibrobacter
+               "darkgoldenrod4", #Camplyobacterota,
+               "midnightblue","royalblue4","steelblue4","blue2", "dodgerblue3", "cornflowerblue", "deepskyblue1", "cyan1", #Bacteroidota,
+               "darkorange3","lightsalmon") #Actinobacteriota
+
+# Colors Switched
+colorgroups_rev = c("lightsalmon", "darkorange3", #Actinobacteriota
+                "cyan1", "deepskyblue1", "cornflowerblue","dodgerblue3","blue2","steelblue4","royalblue4","midnightblue",
+                "darkgoldenrod4", #Camplyobacterota,
+                "darkseagreen", #Fibrobacter
+                "plum1", #Firmicutes,
+                "orchid1","plum3","mediumpurple1","purple","purple3","mediumorchid4","darkmagenta","purple4",
+                "mistyrose", "pink","pink2","palevioletred1","violetred2", "hotpink","palevioletred","violetred3", 
+                "indianred2","red1","orangered3","indianred","red3","firebrick3","brown3","red4","tomato4", "indianred4",
+                "coral4","coral", 
+                "limegreen","forestgreen",  #Fusobacteriota,
+                "lemonchiffon1", "lightgoldenrodyellow", #Proteobacteria,
+                "khaki1","lightgoldenrod2","yellow","gold1","yellow3","darkgoldenrod3","gold3","goldenrod3", "gold4",
+                "grey60","snow1")
+                
+
+pdf("/Users/TaxonomicBarplot_Genus_Lungs.pdf",
+    width = 13, height = 10.5, # Width and height in inches
+    bg = "white", )
+
+ggplot(data=Taxonomy_l_2, aes(x=HamsterID, y=Sum, fill=fct_rev(TaxonomyName))) +
+  geom_bar(aes(), stat = "identity", color = "black", position="stack", width = 0.9) + 
+  scale_fill_manual(values=colorgroups) +
+  facet_grid(~Group_PostInfect, scales = "free", space = "free")+
+  xlab("dpi")+ 
+  ylab("Relative Abundance (%)") +
+  #guides(fill=guide_legend(title = "Taxonomy", ncol =1))+
+  guides(fill= "none")+
+  theme(axis.title.x = element_text(vjust = -.5, size = 24),
+          axis.title.y = element_text(vjust=1.5, size = 24),
+          axis.text.x = element_text(colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          text = element_text(size=26),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5))+
+          #legend.title = element_text(size = 18, face = "bold"), 
+          #legend.text = element_text(size = 14)) +
+  theme(panel.grid = element_blank(),
+          axis.line = element_line(color="black", size = 0.3),
+          panel.border = element_blank(),
+          panel.background =  element_rect(fill='white'))
+
+dev.off() 
+
+# Plot using ggplot with legend
+pdf("/Users/TaxonomicBarplot_Genus_Lungs_labels.pdf",
+    width = 20, height = 17, # Width and height in inches
+    bg = "white", )
+
+ggplot(data=Taxonomy_l_2, aes(x=HamsterID, y=Sum, fill=fct_rev(TaxonomyName))) +
+  geom_bar(aes(), stat = "identity", color = "black", position="stack", width = 0.9) + 
+  scale_fill_manual(values=colorgroups) +
+  facet_grid(~Group_PostInfect, scales = "free", space = "free")+
+  xlab("dpi")+ 
+  ylab("Relative Abundance (%)") +
+  guides(fill=guide_legend(title = "Taxonomy", ncol =1))+
+  theme(axis.title.x = element_text(vjust = -.5, size = 24),
+          axis.title.y = element_text(vjust=1.5, size = 24),
+          axis.text.x = element_text(colour = "black"),
+          axis.text.y = element_text(colour = "black"),
+          text = element_text(size=26),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5),
+          legend.title = element_text(size = 22, face = "bold"))+ 
+          #legend.text = element_text(size = 14)) +
+  theme(panel.grid = element_blank(),
+          axis.line = element_line(color="black", size = 0.5),
+          panel.border = element_blank(),
+          panel.background =  element_rect(fill='white'))
+dev.off() 
+```
+
+# Figure S4B,D, and F: Differential Analysis in the lungs between among the different groups using ALDEx2 at the Genus level 
+```{r}
+# Filter OTUs that are found in at least 10% of samples and total OTU abundance is >= 10 reads 
+library(metagMisc)
+#Phylo.samples_l_filter_10 <- phyloseq_filter_prevalence(Phylo.samples_l_filter, prev.trh = 0.2)
+Phylo.samples_l_filter_10 <- phyloseq_filter_prevalence(Phylo.samples_l_filter, prev.trh = 0.2, abund.trh = 10, abund.type = "mean", threshold_condition = "AND")
+Phylo.samples_l_filter
+Phylo.samples_l_filter_10
+
+# Filter the data so that only 2 groups are shown 
+#Phylo.samples_l_filter_10_Mock_IAVSARS <- Phylo.samples_l_filter_10 %>%
+#  subset_samples(Group_PostInfect != "Mock")
+#Phylo.samples_l_filter_10_Mock_IAVSARS
+
+Phylo.samples_l_filter_10_Mock_IAVSARS_df <- Phylo.samples_l_filter_10_Mock_IAVSARS %>%  
+  psmelt() 
+
+# Change any NA to the name of the family
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited <- Phylo.samples_l_filter_10_Mock_IAVSARS_df
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus <- ifelse(is.na(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus), Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Family, Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus)
+
+# remove unnecessary columns
+#Phylo.samples_l_filter_10_Mock_IAVSARS_df_edit <- Phylo.samples_l_filter_10_Mock_IAVSARS_df[,c(1,3,4)]
+
+# transform the table so that you add the aggregated abundances 
+dc <- dcast(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited, Genus~SampleID, value.var = "Abundance", sum)
+
+# Make the first column the row header 
+rownames(dc) <- dc[,1]
+# remove first column 
+dc <- dc[,-1]
+# add 1 to all values 
+dc_matrix_plus1 = dc + 1
+
+# Define the conditions 
+#conds <- c(rep("Mock", 3), rep("IAVSARS", 7))
+
+#conds <- c(rep("Mock", 3), rep("SARS", 6))
+
+#conds <- c(rep("SARS", 6), rep("IAVSARS", 7))
+
+# Perform aldex on pairwise comparison. Most basic function 
+#aldexMock_IAVSARS <- aldex(dc, conds, mc.samples = 128, test="t", effect=TRUE, verbose = FALSE)
+
+# The workflow for the modular approach first generates random instances of the centred log-ratio transformed values. There are three inputs: counts table, a vector of conditions, and the number of Monte-Carlo (DMC) instances; and several parameters: a string indicating if iqlr, zero or all feature are used as the denominator is required, and level of verbosity (TRUE or FALSE). We recommend 128 or more mc.samples for the t-test, 1000 for a rigorous effect size calculation, and at least 16 for ANOVA
+aldexMock_IAVSARS_clr <- aldex.clr(dc_matrix_plus1, conds, mc.samples = 128, verbose = TRUE)
+
+# The next operation performs the Welch’s t and Wilcoxon rank test for the situation when there are only two conditions. There are only two inputs: the aldex object from aldex.clr and whether a paired test should be conducted or not (TRUE or FALSE).
+x.tt <- aldex.ttest(aldexMock_IAVSARS_clr, paired.test=FALSE, hist.plot = TRUE, verbose=TRUE)
+
+# Finally, we estimate effect size and the within and between condition values in the case of two conditions. This step is required for plotting, in our lab we base our conclusions primarily on the output of this function.There is one input: the aldex object from aldex.clr, ; and several parameters: a flag as to whether to include values for all samples or not are used as the denominator, and the level of verbosity. It is also possible to include the 95% confidence interval information for the effect size estimate with the flag CI=TRUE. This can be helpful when deciding whether to include or exclude specific features from consideration. We find that a large effect but that is an outlier for the extremes of the effect distribution can be false positives.
+x.effect <- aldex.effect(aldexMock_IAVSARS_clr, CI=T, verbose=TRUE)
+
+# the t-test and effect data are merged into one object.
+x.all_Mock_IAVSARS <- data.frame(x.tt,x.effect)
+
+write.csv(x.all_Mock_IAVSARS,"/Users/ALDeX2_Genus_Lungs_MockSARS_Output.csv")
+
+pdf("/Users/ALDeX2_Genus_Lungs_MockSARS_MW.pdf",
+    width = 3.5, height = 4, # Width and height in inches (3.5 x 4 for single graph) (7 x 4 for double graph)
+    bg = "white", )
+
+#par(mfrow=c(1,2))
+#aldex.plot(x.all_Mock_IAVSARS, type="MA", test="welch", xlab="Log-ratio abundance",
+#    ylab="Difference")
+aldex.plot(x.all_Mock_IAVSARS, type="MW", test="welch")
+
+dev.off()
+
+
+# identify which values are significant in wilcox
+signocorrect <- which(x.all_Mock_IAVSARS$wi.ep < 0.05)
+signocorrect
+
+# identify which values are significant in wilcox
+sig <- which(x.all_Mock_IAVSARS$wi.eBH < 0.05)
+sig
+# identify which values have an effect size of greater than 2 and have a effect size CI that does not overlap 0 
+effectsize <- which(x.all_Mock_IAVSARS$effect > 1.5 | x.all_Mock_IAVSARS$effect.low > 0)
+effectsize
+
+pdf("/Users/ALDeX2_Genus_Lungs_IAVSARS_MW.pdf",
+    width = 3.5, height = 4, # Width and height in inches (3.5 x 4 for single graph) (7 x 4 for double graph)
+    bg = "white", )
+
+plot(x.all_Mock_IAVSARS$diff.win, x.all_Mock_IAVSARS$diff.btw, pch=19, cex=0.4, col = "gray54", 
+     xlab="Difference within", ylab="Difference between")
+points(x.all_Mock_IAVSARS$diff.win[signocorrect], x.all_Mock_IAVSARS$diff.btw[signocorrect], pch=21, cex=0.4, bg="limegreen", col = "limegreen")
+points(x.all_Mock_IAVSARS$diff.win[sig], x.all_Mock_IAVSARS$diff.btw[sig], pch=21, cex=0.4, bg="red", col = "red")
+points(x.all_Mock_IAVSARS$diff.win[effectsize], x.all_Mock_IAVSARS$diff.btw[effectsize], pch=21, cex=0.5, col = "blue")
+abline(0,1,lty=2)
+abline(0,-1,lty=2)
+
+dev.off()
+```
+
+# Figure S4A (left): Differential Analysis in the lungs between Mock and the SARS2 groups Using Deseq2
+```{r}
+# Make the first file input for deseq2 that contains (Make a data frame with your counts, every gene a row, every sample a column. Do put the gene names as the first column, and the sample names as the header row)
+
+# Filter OTUs that are found in at least 20% of samples and total OTU abundance is >= 10 reads 
+library(metagMisc)
+Phylo.samples_l_filter_10 <- phyloseq_filter_prevalence(Phylo.samples_l_filter, prev.trh = 0.2, abund.trh = 10, abund.type = "mean", threshold_condition = "AND")
+Phylo.samples_l_filter
+Phylo.samples_l_filter_10
+
+# Filter the data so that only 2 groups are shown 
+Phylo.samples_l_filter_10_Mock_IAVSARS <- Phylo.samples_l_filter_10 %>%
+  subset_samples(Group_PostInfect != "IAV-SARS-CoV-2")
+Phylo.samples_l_filter_10_Mock_IAVSARS
+
+Phylo.samples_l_filter_10_Mock_IAVSARS_df <- Phylo.samples_l_filter_10_Mock_IAVSARS %>%  
+  psmelt() 
+
+# Testing out naming unclassified families 
+# Change any NA to the name of the family
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited <- Phylo.samples_l_filter_10_Mock_IAVSARS_df
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus <- ifelse(is.na(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus), Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Family, Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus)
+
+# transform the table so that you add the aggregated abundances 
+dc <- dcast(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited, Genus~SampleID, value.var = "Abundance", sum)
+
+# Make the first column the row header 
+rownames(dc) <- dc[,1]
+# remove first column 
+dc <- dc[,-1]
+dc_matrix <- data.matrix(dc, rownames.force = TRUE)
+# add 1 to all values 
+dc_matrix_plus1 = dc_matrix + 1
+
+# Make the second file (first column being sample names, and the other columns being factors, like "treatment" or "time point" or "date of sequencing" or "species")
+# remove unnecessary columns
+metadata_Lungs <- metadata %>%
+  filter(SampleType == "Lung")
+
+metadata_Lungs <- metadata_Lungs %>%
+  filter(DeseqGroup != "IAV_SARSCoV2") 
+
+Taxonomy_l_removed9_taxglom_metadata <- metadata_Lungs[,c(1,6)]
+
+# Construct Deseq table 
+ddsFullCountTable_plus1 <- DESeqDataSetFromMatrix(
+    countData = dc_matrix_plus1,
+    colData = Taxonomy_l_removed9_taxglom_metadata,
+    design = ~ DeseqGroup)
+ddsFullCountTable_plus1
+
+# Relevel Deseq table so that Mock is considered the control
+ddsFullCountTable_plus1$DeseqGroup <- relevel(ddsFullCountTable_plus1$DeseqGroup, "Mock" )
+
+dds <- DESeq(ddsFullCountTable_plus1, fitType = "local") 
+plotDispEsts(dds)
+
+# check levels of the Deseq ("DeseqGroup_Mock_vs_IAV_SARSCoV2")
+resultsNames(dds)
+
+# Create a Results table 
+res <- results(dds, cooksCutoff = FALSE) 
+res
+res = res[order(res$padj, na.last=NA), ]
+sigtab05 = res[(res$padj < 0.01), ]
+dim(sigtab05)
+
+res_table = cbind(as(res, "data.frame"))
+sigtab05_table = cbind(as(sigtab05, "data.frame"))
+
+#Write out as csv
+write.csv(res_table,"/Users/Deseq2_MockSARS_Analysis.csv")
+
+# Add a column showing the genus 
+sigtab05_table$Genus <- row.names(sigtab05_table)
+
+# Add unclassified to the families
+sigtab05_table$Genus <-replace(sigtab05_table$Genus,sigtab05_table$Genus == "[Eubacterium] coprostanoligenes group","Unclassified [Eubacterium] coprostanoligenes group")
+sigtab05_table$Genus <-replace(sigtab05_table$Genus,sigtab05_table$Genus == "Carnobacteriaceae","Unclassified Carnobacteriaceae")
+
+# Order the Genus 
+sigtab05_table$Genus <- factor(sigtab05_table$Genus, levels = c("Muribaculum", "Prevotella_7", "Prevotellaceae UCG-003", #Bacteroidota
+  "Campylobacter", #Campylobacterota
+  "Fibrobacter",
+  "Dialister","Johnsonella", "Lachnoclostridium", "Streptococcus","Unclassified Carnobacteriaceae","Unclassified [Eubacterium] coprostanoligenes group", #Firmicutes
+  "Fusobacterium", #Fusobacteria
+  "Haemophilus", "Moraxella")) #Proteobacteria
+
+
+# Graph the log2foldchange 
+bxp <- ggplot(sigtab05_table, aes(x = log2FoldChange, y = fct_rev(Genus), fill = log2FoldChange > 0))+
+  geom_col(colour = "Black")+
+  scale_fill_manual(name = 'log2FoldChange > 0', values = setNames(c('coral2','grey66'),c(T, F)))+
+  theme_minimal()+
+  geom_vline(xintercept=c(-10,-5,0,5,10), color = "gray63", size = 0.2)+
+  theme(axis.title.x = element_text(colour = "black", size = 11),
+          axis.title.y = element_blank(),
+          axis.text.x = element_text(colour = "black",size = 10),
+          axis.text.y = element_text(colour = "black", size = 10),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5))+
+    theme(axis.line = element_line(color="black", size = 0.5),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(), 
+        legend.position = "none")
+bxp 
+
+dp <- ggplot(sigtab05_table, aes(x = lfcSE, y = fct_rev(Genus)))+
+  geom_point() +
+  scale_x_continuous(breaks = seq(0, 2.5, by=0.5), limits=c(0, 2.5))+
+  theme_minimal()+
+  theme(axis.text.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_text(colour = "black"), 
+        axis.title.x = element_text(colour = "black"))+
+  theme(axis.line = element_line(color="black", size = 0.4))
+dp  
+
+pdf("/Users/Deseq2_Genus_Lungs_MockSARS.pdf",
+    width = 10.5, height =5, # Width and height in inches (3.5 x 4 for single graph) (7 x 4 for double graph)
+    bg = "white", )
+
+ggarrange(bxp, dp,
+  widths = c(3,1))
+
+dev.off()
+```
+
+# Figure S4C (left): Differential Analysis in the lungs between Mock and the FLUAV-SARS2 groups Using Deseq2
+```{r}
+# Make the first file input for deseq2 that contains (Make a data frame with your counts, every gene a row, every sample a column. Do put the gene names as the first column, and the sample names as the header row)
+
+# Filter OTUs that are found in at least 20% of samples and total OTU abundance is >= 10 reads 
+library(metagMisc)
+Phylo.samples_l_filter_10 <- phyloseq_filter_prevalence(Phylo.samples_l_filter, prev.trh = 0.2, abund.trh = 10, abund.type = "mean", threshold_condition = "AND")
+Phylo.samples_l_filter
+Phylo.samples_l_filter_10
+
+# Filter the data so that only 2 groups are shown 
+Phylo.samples_l_filter_10_Mock_IAVSARS <- Phylo.samples_l_filter_10 %>%
+  subset_samples(Group_PostInfect != "SARS-CoV-2")
+Phylo.samples_l_filter_10_Mock_IAVSARS
+
+Phylo.samples_l_filter_10_Mock_IAVSARS_df <- Phylo.samples_l_filter_10_Mock_IAVSARS %>%  
+  psmelt() 
+
+# Change any NA to the name of the family
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited <- Phylo.samples_l_filter_10_Mock_IAVSARS_df
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus <- ifelse(is.na(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus), Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Family, Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus)
+
+# transform the table so that you add the aggregated abundances 
+dc <- dcast(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited, Genus~SampleID, value.var = "Abundance", sum)
+
+# Make the first column the row header 
+rownames(dc) <- dc[,1]
+# remove first column 
+dc <- dc[,-1]
+dc_matrix <- data.matrix(dc, rownames.force = TRUE)
+# add 1 to all values 
+dc_matrix_plus1 = dc_matrix + 1
+
+# Make the second file (first column being sample names, and the other columns being factors, like "treatment" or "time point" or "date of sequencing" or "species")
+# remove unnecessary columns
+metadata_Lungs <- metadata %>%
+  filter(SampleType == "Lung")
+
+metadata_Lungs <- metadata_Lungs %>%
+  filter(DeseqGroup != "SARSCoV2") 
+
+Taxonomy_l_removed9_taxglom_metadata <- metadata_Lungs[,c(1,6)]
+
+# Construct Deseq table 
+ddsFullCountTable_plus1 <- DESeqDataSetFromMatrix(
+    countData = dc_matrix_plus1,
+    colData = Taxonomy_l_removed9_taxglom_metadata,
+    design = ~ DeseqGroup)
+ddsFullCountTable_plus1
+
+# Relevel Deseq table so that Mock is considered the control
+ddsFullCountTable_plus1$DeseqGroup <- relevel(ddsFullCountTable_plus1$DeseqGroup, "Mock" )
+
+dds <- DESeq(ddsFullCountTable_plus1, fitType = "local") 
+plotDispEsts(dds)
+
+# check levels of the Deseq ("DeseqGroup_IAV_SARSCoV2_vs_Mock")
+resultsNames(dds)
+
+# Create a Results table 
+res <- results(dds, cooksCutoff = FALSE) 
+res
+res = res[order(res$padj, na.last=NA), ]
+sigtab05 = res[(res$padj < 0.01), ]
+dim(sigtab05)
+
+sigtab05_table = cbind(as(sigtab05, "data.frame"))
+
+res_table = cbind(as(res, "data.frame"))
+
+#Write out as csv
+write.csv(res_table,"/Users/Deseq2_MockIAV_Analysis.csv")
+
+# Add a column showing the genus 
+sigtab05_table$Genus <- row.names(sigtab05_table)
+
+# Add unclassified to the families
+sigtab05_table$Genus <-replace(sigtab05_table$Genus,sigtab05_table$Genus == "[Eubacterium] coprostanoligenes group","Unclassified [Eubacterium] coprostanoligenes group")
+sigtab05_table$Genus <-replace(sigtab05_table$Genus,sigtab05_table$Genus == "Carnobacteriaceae","Unclassified Carnobacteriaceae")
+
+# Order the Genus 
+sigtab05_table$Genus <- factor(sigtab05_table$Genus, levels = c("Actinomyces", #Actinobacteria
+  "Muribaculum", "Prevotella_7", #Bacteroidota
+  "Campylobacter", "Helicobacter", #Campylobacterota
+  "Finegoldia", "Johnsonella", "Lachnospiraceae NK3A20 group", "Mycoplasma", "Peptococcus", "Staphylococcus", "Streptococcus", 
+  "Unclassified Carnobacteriaceae","Unclassified [Eubacterium] coprostanoligenes group", #Firmicutes
+  "Fusobacterium", #Fusobacteria
+  "Actinobacillus", "Enhydrobacter", "Haemophilus")) #Proteobacteria
+
+# Graph the log2foldchange 
+bxp <- ggplot(sigtab05_table, aes(x = log2FoldChange, y = fct_rev(Genus), fill = log2FoldChange > 0))+
+  geom_col(colour = "Black")+
+  scale_fill_manual(name = 'log2FoldChange > 0', values = setNames(c('dodgerblue1','grey66'),c(T, F)))+
+  theme_minimal()+
+  geom_vline(xintercept=c(-5,0,5,10), color = "gray63", size = 0.2)+
+  theme(axis.title.x = element_text(colour = "black", size = 11),
+          axis.title.y = element_blank(),
+          axis.text.x = element_text(colour = "black",size = 10),
+          axis.text.y = element_text(colour = "black", size = 10),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5))+
+    theme(axis.line = element_line(color="black", size = 0.5),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(), 
+        legend.position = "none")
+bxp 
+
+dp <- ggplot(sigtab05_table, aes(x = lfcSE, y = fct_rev(Genus)))+
+  geom_point() +
+  scale_x_continuous(breaks = seq(0, 2.5, by=0.5), limits=c(0, 2.5))+
+  theme_minimal()+
+  theme(axis.text.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_text(colour = "black"), 
+        axis.title.x = element_text(colour = "black"))+
+  theme(axis.line = element_line(color="black", size = 0.4))
+dp 
+
+pdf("/Users/Deseq2_Genus_Lungs_MockIAV.pdf",
+    width = 10.2, height =5, # Width and height in inches (3.5 x 4 for single graph) (7 x 4 for double graph)
+    bg = "white", )
+
+ggarrange(bxp, dp,
+  widths = c(3,1))
+
+dev.off()
+```
+
+# Figure S4E (left): Differential Analysis in the lungs between SARS-CoV-2 and the FLUAV-SARS2 groups Using Deseq2
+```{r}
+# Make the first file input for deseq2 that contains (Make a data frame with your counts, every gene a row, every sample a column. Do put the gene names as the first column, and the sample names as the header row)
+
+# Filter OTUs that are found in at least 20% of samples and total OTU abundance is >= 10 reads 
+library(metagMisc)
+Phylo.samples_l_filter_10 <- phyloseq_filter_prevalence(Phylo.samples_l_filter, prev.trh = 0.2, abund.trh = 10, abund.type = "mean", threshold_condition = "AND")
+Phylo.samples_l_filter
+Phylo.samples_l_filter_10
+
+# Filter the data so that only 2 groups are shown 
+Phylo.samples_l_filter_10_Mock_IAVSARS <- Phylo.samples_l_filter_10 %>%
+  subset_samples(Group_PostInfect != "Mock")
+Phylo.samples_l_filter_10_Mock_IAVSARS
+
+Phylo.samples_l_filter_10_Mock_IAVSARS_df <- Phylo.samples_l_filter_10_Mock_IAVSARS %>%  
+  psmelt() 
+
+# Testing out naming unclassified families 
+# Change any NA to the name of the family
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited <- Phylo.samples_l_filter_10_Mock_IAVSARS_df
+Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus <- ifelse(is.na(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus), Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Family, Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited$Genus)
+
+# transform the table so that you add the aggregated abundances 
+dc <- dcast(Phylo.samples_l_filter_10_Mock_IAVSARS_df_edited, Genus~SampleID, value.var = "Abundance", sum)
+
+# Make the first column the row header 
+rownames(dc) <- dc[,1]
+# remove first column 
+dc <- dc[,-1]
+dc_matrix <- data.matrix(dc, rownames.force = TRUE)
+# add 1 to all values 
+dc_matrix_plus1 = dc_matrix + 1
+
+# Make the second file (first column being sample names, and the other columns being factors, like "treatment" or "time point" or "date of sequencing" or "species")
+# remove unnecessary columns
+metadata_Lungs <- metadata %>%
+  filter(SampleType == "Lung")
+
+metadata_Lungs <- metadata_Lungs %>%
+  filter(DeseqGroup != "Mock") 
+
+Taxonomy_l_removed9_taxglom_metadata <- metadata_Lungs[,c(1,6)]
+
+# Construct Deseq table 
+ddsFullCountTable_plus1 <- DESeqDataSetFromMatrix(
+    countData = dc_matrix_plus1,
+    colData = Taxonomy_l_removed9_taxglom_metadata,
+    design = ~ DeseqGroup)
+ddsFullCountTable_plus1
+
+# Relevel Deseq table so that Mock is considered the control
+ddsFullCountTable_plus1$DeseqGroup <- relevel(ddsFullCountTable_plus1$DeseqGroup, "SARSCoV2" )
+
+dds <- DESeq(ddsFullCountTable_plus1, fitType = "local") 
+plotDispEsts(dds)
+
+# check levels of the Deseq ("DeseqGroup_SARSCoV2_vs_IAV_SARSCoV2")
+resultsNames(dds)
+
+# Create a Results table 
+res <- results(dds, cooksCutoff = FALSE) 
+res
+res = res[order(res$padj, na.last=NA), ]
+sigtab05 = res[(res$padj < 0.01), ]
+dim(sigtab05)
+
+res_table = cbind(as(res, "data.frame"))
+
+sigtab05_table = cbind(as(sigtab05, "data.frame"))
+
+#Write out as csv
+write.csv(res_table,"/Users/Deseq2_SARSIAV_Analysis.csv")
+
+# Add a column showing the genus 
+sigtab05_table$Genus <- row.names(sigtab05_table)
+
+# Add unclassified to the families
+sigtab05_table$Genus <-replace(sigtab05_table$Genus,sigtab05_table$Genus == "Actinomycetaceae","Unclassified Actinomycetaceae")
+
+# Order the Genus 
+sigtab05_table$Genus <- factor(sigtab05_table$Genus, levels = c("Olsenella", "Unclassified Actinomycetaceae", #Actinobacteria
+                                                                "Helicobacter", #Campylobacterota
+                                                                "Anaerococcus","Finegoldia", "Solobacterium", "UCG-005",
+                                                                "Veillonella" #Firmicutes
+                                                                )) 
+
+# Graph the log2foldchange 
+bxp <- ggplot(sigtab05_table, aes(x = log2FoldChange, y = fct_rev(Genus), fill = log2FoldChange > 0))+
+  geom_col(colour = "Black")+
+  scale_fill_manual(name = 'log2FoldChange > 0', values = setNames(c('dodgerblue1','coral2'),c(T, F)))+
+  theme_minimal()+
+  geom_vline(xintercept=c(-10,-5,0,5,10), color = "gray63", size = 0.2)+
+  theme(axis.title.x = element_text(colour = "black", size = 11),
+          axis.title.y = element_blank(),
+          axis.text.x = element_text(colour = "black",size = 10),
+          axis.text.y = element_text(colour = "black", size = 10),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5))+
+    theme(axis.line = element_line(color="black", size = 0.5),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(), 
+        legend.position = "none")
+bxp 
+
+dp <- ggplot(sigtab05_table, aes(x = lfcSE, y = fct_rev(Genus)))+
+  geom_point() +
+  scale_x_continuous(breaks = seq(0, 2.5, by=0.5), limits=c(0, 2.5))+
+  theme_minimal()+
+  theme(axis.text.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_text(colour = "black"), 
+        axis.title.x = element_text(colour = "black"))+
+  theme(axis.line = element_line(color="black", size = 0.4))
+dp  
+
+pdf("/Users/Deseq2_Genus_Lungs_SARSIAV.pdf",
+    width = 10.5, height =5, # Width and height in inches (3.5 x 4 for single graph) (7 x 4 for double graph)
+    bg = "white", )
+
+ggarrange(bxp, dp,
+  widths = c(3,1))
+
+dev.off()
+```
+
+# Figure 4A, 4B, and S4G: Produce the file to submit for Lefse analysis
+```{r}
+Phylo.samples_l_rare_10 <- phyloseq_filter_prevalence(Phylo.rare_l, prev.trh = 0.2, abund.trh = 10, abund.type = "mean", threshold_condition = "AND")
+Phylo.rare_l
+Phylo.samples_l_rare_10
+
+Taxonomy_l_lefse <- Phylo.samples_l_rare_10 %>%       # Transform to relative abundance
+  psmelt()                                             # Melt to long format (this is for ggplot), create dataframe
+
+Taxonomy_l_lefse[is.na(Taxonomy_l_lefse)] <- "" 
+
+# Create a new column called TaxonomyName that combines the different taxonomic levels separated by ; 
+Taxonomy_l_lefse$TaxonomyName<-paste(Taxonomy_l_lefse$Kingdom, Taxonomy_l_lefse$Phylum,Taxonomy_l_lefse$Class, Taxonomy_l_lefse$Order, Taxonomy_l_lefse$Family, Taxonomy_l_lefse$Genus,sep="|")
+
+Phylo.samples_l_rare_10_lefse <- Taxonomy_l_lefse %>%
+  filter(Group_PostInfect != "SARS-CoV-2") 
+
+# Rename all NA to unclassified 
+#Taxonomy_l_removed9_taxglom_edit[is.na(Taxonomy_l_removed9_taxglom_edit)] <- "Unclassified"
+# transform the table so that you add the aggregated abundances 
+dc <- dcast(Phylo.samples_l_rare_10_lefse, TaxonomyName~Sample, value.var = "Abundance", sum)
+
+write.csv(dc, "/Users/LefseFile_lungs_MockIAVSARS.csv")
+```
+
+### Figure 4C: Producing a heatmap of taxonomy names and correlation factors 
+```{r}
+# Filter taxa not seen more than 3 times in at least 20% of the samples
+Phylo.samples_l_filter_10 <- phyloseq_filter_prevalence(Phylo.samples_l_filter, prev.trh = 0.2, abund.trh = 10, abund.type = "mean", threshold_condition = "AND")
+
+Taxonomy_l_removed9_corr<- Phylo.samples_l_filter_10 %>%  
+  #tax_glom(taxrank = "Genus", NArm = FALSE) %>% 
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%       # Transform to relative abundance
+  psmelt()                                             # Melt to long format (this is for ggplot), create dataframe
+
+# Multiply the abundance by 100 for a percentage
+Taxonomy_l_removed9_corr$Abundance <- Taxonomy_l_removed9_corr$Abundance*100
+
+# Change any NA to the name of the family
+Taxonomy_l_removed9_corr_edited <- Taxonomy_l_removed9_corr
+Taxonomy_l_removed9_corr_edited$Genus <- ifelse(is.na(Taxonomy_l_removed9_corr_edited$Genus), Taxonomy_l_removed9_corr_edited$Family, Taxonomy_l_removed9_corr_edited$Genus)
+
+
+# transform the table so that you add the aggregated abundances 
+dc_otu <- dcast(Taxonomy_l_removed9_corr_edited, SampleID~Genus, value.var = "Abundance", sum)
+
+# Make the first column the row header 
+rownames(dc_otu) <- dc_otu[,1]
+# remove first column 
+dc_otu <- dc_otu[,-1]
+dc_otu_matrix <- data.matrix(dc_otu, rownames.force = TRUE)
+
+# Perform log10 + 1 transformation
+x = log10(dc_otu_matrix + 1)
+
+# import metadata for correlation analysis without hamster 9 
+corr_metadata <- read.csv("/Users/SARS_hamster_metadata_correlation_lung.csv")
+
+# Make the first column the row header 
+rownames(corr_metadata) <- corr_metadata[,1]
+# remove first column 
+corr_metadata<- corr_metadata[,-c(1,2)]
+# since we turn into a matrix we set the groups to numbers (mock = 1, SARS = 2, IAV = 3) and (non-infected = 1 and infected = 2)
+
+# correlate the two tables 
+
+# Cross correlate data sets
+correlation.table <- associate(x, corr_metadata, p.adj.method = "BH", method = "spearman", mode = "table")
+df <- correlation.table
+
+df$X1 <- recode(df$X1, Actinomycetaceae = 'Unclassified Actinomycetaceae',
+                           Muribaculaceae  = 'Unclassified Muribaculaceae',
+                           Prevotellaceae = 'Unclassified Prevotellaceae',
+                           Carnobacteriaceae  = 'Unclassified Carnobacteriaceae',
+                           Erysipelotrichaceae = 'Unclassified Erysipelotrichaceae', 
+                           Eubacteriaceae = 'Unclassified Eubacteriaceae',
+                           Lachnospiraceae = 'Unclassified Lachnospiraceae',
+                           Veillonellaceae  = 'Unclassified Veillonellaceae',
+                           Neisseriaceae = 'Unclassified Neisseriaceae', 
+                           Pasteurellaceae = 'Unclassified Pasteurellaceae')
+
+levels(df$X1)[levels(df$X1)=='[Eubacterium] coprostanoligenes group'] <- 'Unclassified [Eubacterium] coprostanoligenes group'
+
+df$X1 <- factor(df$X1, levels = c('Actinomyces', 'Bifidobacterium','Corynebacterium', 'Olsenella',  
+                                  'Unclassified Actinomycetaceae', #Actinob
+                                  
+                                  'Bacteroides','Bergeyella', 'Muribaculum', 'Porphyromonas', 'Prevotella', 'Prevotella_7', 
+                                  'Prevotellaceae UCG-003', 'Rikenellaceae RC9 gut group','Bacteroidales RF16 group', 
+                                  'Unclassified Muribaculaceae', 'Unclassified Prevotellaceae', #Bacteroidota
+                                  
+                                  'Campylobacter', 'Helicobacter', #Campy
+                                  
+                                  'Elusimicrobium',
+                                  
+                                  'Fibrobacter', #Fibro
+                                  
+                                  'Allobaculum', 'Faecalibaculum', 'Granulicatella', 'Ileibacterium', 'Mycoplasma', 'Staphylococcus',
+                                  'Streptococcus', 'Solobacterium','Sutterella', 'Unclassified Carnobacteriaceae', 'Unclassified Erysipelotrichaceae',
+                                  #Firmicutes baccili
+                                  
+                                  'Anaerococcus','[Eubacterium] siraeum group', 'Ezakiella', 'Fenollaria', 'Finegoldia', 'Johnsonella',
+                                  'Lachnoclostridium', 'Lachnospiraceae NK3A20 group', 'Lachnospiraceae NK4A136 group', 'Oscillibacter', 'Peptococcus',
+                                  'Peptoniphilus',
+                                  'Peptostreptococcus', 'UCG-005','Unclassified [Eubacterium] coprostanoligenes group','Unclassified Eubacteriaceae',
+                                  'Unclassified Lachnospiraceae', #Firmicutes clostridia
+                                  
+                                  'Dialister', 'Veillonella', 'Unclassified Veillonellaceae', #Firmicutes negati
+                                  
+                                  
+                                  'Fusobacterium', 'Leptotrichia', #Fusobacteria
+                                
+                                  'Actinobacillus', 'Enhydrobacter','Escherichia-Shigella', 'Haemophilus', 'Mannheimia', 'Moraxella', 'Rodentibacter', 
+                                  'Unclassified Neisseriaceae', 'Unclassified Pasteurellaceae')) #Proteobact
+
+df$X2 <- factor(df$X2, levels = c('IAV', 'Challenged', 'R.NT', 'R.Trachea', 'R.Lung', 'R.Brain', 'R.Heart', 'R.Duodenum', 'R.Ileum', 'R.Cecum', 'P.NT', 'P.Trachea', 'P.Lung', 'P.Brain', 'P.Heart', 'P.SI', 'P.LI'))
+ 
+df2 <- df %>%
+  filter(X2 != "P.SI") %>%
+  filter(X2 != "P.Heart")
+
+theme_set(theme_bw(20))
+
+# Plot using ggplot with legend
+pdf("/Users/Correlation_Heatmap_GenusUnclassifiedFamilies_Lungs.pdf",
+    width = 8, height = 12, 
+    bg = NA) # Width and height in inches
+
+ggplot(df2, aes(X2, fct_rev(X1), group=X2)) +
+    geom_tile(aes(fill = Correlation)) +
+    geom_text(aes(fill = Correlation, label = round(Correlation, 2),
+                  #fontface = ifelse(p.adj < 0.050, 2, 1)),
+                  fontface = ifelse(Correlation > 0.6 | Correlation < -0.6, 2, 1)),
+                  #fontface = ifelse(Correlation < -0.51, 2, 1)), 
+              size = 2.5) +
+    scale_fill_gradientn("Correlation", 
+                      breaks = seq(from = -1, to = 1,  by = 0.25), 
+                      colours = c("blue", "white", "red"), 
+                  limits = c(-1, 1)) +
+    labs(x = "", y = "")+
+    theme(axis.title.x=element_blank(),
+          axis.title.y = element_blank(),
+          axis.text.x = element_text(colour = "black", size = 9),
+          axis.text.y = element_text(colour = "black", size = 10, face = "italic"),
+          axis.line.x = element_line(color="black", size = 0.5),
+          axis.line.y = element_line(color="black", size = 0.5),
+          legend.title = element_blank(), 
+          legend.text = element_text(size = 8)) +
+  theme(panel.grid = element_blank(),
+          axis.line = element_line(color="black", size = 0.5), 
+          legend.position="bottom", 
+          legend.key.width = unit(1.3, 'cm'))
+
+dev.off()
+```
