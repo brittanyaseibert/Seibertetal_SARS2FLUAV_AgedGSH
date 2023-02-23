@@ -1,5 +1,5 @@
 ---
-title: "Alpha Diversity Analysis"
+title: "Alpha Diversity Analysis for Lung Samples"
 author: "Brittany Seibert"
 output:
   word_document: default
